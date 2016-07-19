@@ -10,12 +10,10 @@ import math
 import pickle
 import datetime
 import pandas as pd
-import statistics
 import time
 from shutil import copy2
 import warnings
 import random
-import theano
 warnings.filterwarnings("ignore")
 
 from sklearn.cross_validation import train_test_split
@@ -318,7 +316,7 @@ def get_validation_predictions(train_data, predictions_valid):
 
 def run_cross_validation(nfolds=10):
     # input image dimensions
-    img_rows, img_cols = 64, 64
+    img_rows, img_cols = 128, 128
     # color type: 1 - grey, 3 - rgb
     color_type_global = 1
     batch_size = 16
@@ -455,5 +453,5 @@ def run_single():
 
 
 if __name__ == '__main__':
-    run_cross_validation(13)
+    run_cross_validation(3)
     # run_single()

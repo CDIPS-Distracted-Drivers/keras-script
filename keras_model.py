@@ -14,7 +14,7 @@ import time
 from shutil import copy2
 import warnings
 import random
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore")  # this is weird
 
 from sklearn.cross_validation import train_test_split
 from sklearn.cross_validation import KFold

@@ -242,6 +242,29 @@ def read_and_normalize_test_data(img_rows=224, img_cols=224, color_type=1):
     print(test_data.shape[0], 'test samples')
     return test_data, test_id
 
+def read_test_data(img_rows=224, img_cols=224, color_type=1):
+    cache_path = os.path.join('cache', 'test_r_' + str(img_rows) +
+                              '_c_' + str(img_cols) + '_t_' +
+                              str(color_type) + '.dat')
+    if not os.path.isfile(cache_path) or use_cache == 0:
+        test_data, test_id = load_test(img_rows, img_cols, color_type)
+        cache_data((test_data, test_id), cache_path)
+    else:
+        print('Restore test from cache!')
+        (test_data, test_id) = restore_data(cache_path)
+
+    test_data = np.array(test_data, dtype=np.uint8)
+
+    if color_type == 1:
+        test_data = test_data.reshape(test_data.shape[0], color_type,
+                                      img_rows, img_cols)
+    else:
+        test_data = test_data.transpose((0, 3, 1, 2))
+
+    print('Test shape:', test_data.shape)
+    print(test_data.shape[0], 'test samples')
+
+    return test_data, test_id
 
 def dict_to_list(d):
     ret = []
@@ -331,6 +354,8 @@ def vgg_std16_model(img_rows, img_cols, color_type=1):
 
     # Code above loads pre-trained data and
     model.layers.pop()
+    model.outputs = [model.layers[-1].output]
+    model.layers[-1].outbound_nodes = []
     model.add(Dense(10, activation='softmax'))
     # Learning rate is changed to 0.001
     sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
@@ -343,7 +368,7 @@ def run_cross_validation(nfolds=10, nb_epoch=10, split=0.2, modelStr=''):
     # Now it loads color image
     # input image dimensions
     img_rows, img_cols = 224, 224
-    batch_size = 32
+    batch_size = 20
     random_state = 20
 
     train_data, train_target, driver_id, unique_drivers = \
@@ -392,6 +417,8 @@ def run_cross_validation(nfolds=10, nb_epoch=10, split=0.2, modelStr=''):
         # for i in range(len(test_index)):
         #    yfull_train[test_index[i]] = predictions_valid[i]
 
+    # If you were to use this function for training, I would suggest to comment out everything below here 
+    # in this function and use the test_model_and_submit function instead.
     print('Start testing............')
     test_data, test_id = read_and_normalize_test_data(img_rows, img_cols,
                                                       color_type_global)
@@ -413,24 +440,77 @@ def run_cross_validation(nfolds=10, nb_epoch=10, split=0.2, modelStr=''):
     test_res = merge_several_folds_mean(yfull_test, nfolds)
     create_submission(test_res, test_id, info_string)
 
+def run_single(nb_epoch=1, split=0.1, modelStr=''):
+
+    # Now it loads color image
+    # input image dimensions
+    img_rows, img_cols = 224, 224
+    batch_size = 20
+    random_state = 20
+    num_fold = 1
+
+    train_data, train_target, driver_id, unique_drivers = \
+        read_and_normalize_and_shuffle_train_data(img_rows, img_cols,
+                                                  color_type_global)
+
+    # ishuf_train_data = []
+    # shuf_train_target = []
+    # index_shuf = range(len(train_target))
+    # shuffle(index_shuf)
+    # for i in index_shuf:
+    #     shuf_train_data.append(train_data[i])
+    #     shuf_train_target.append(train_target[i])
+
+    # yfull_train = dict()
+    # yfull_test = []
+    model = vgg_std16_model(img_rows, img_cols, color_type_global)
+    model.fit(train_data, train_target, batch_size=batch_size,
+                  nb_epoch=nb_epoch,
+                  show_accuracy=True, verbose=1,
+                  validation_split=split, shuffle=True)
+
+    save_model(model, num_fold, modelStr)
 
 def test_model_and_submit(start=1, end=1, modelStr=''):
     img_rows, img_cols = 224, 224
     # batch_size = 64
     # random_state = 51
-    nb_epoch = 15
+    nb_epoch = 1
 
     print('Start testing............')
-    test_data, test_id = read_and_normalize_test_data(img_rows, img_cols,
-                                                      color_type_global)
+    test_data, test_id = read_test_data(img_rows, img_cols, color_type_global)
+    # split the test_data into 5 subsets
+    sub_test_data = np.array_split(test_data, 5)
     yfull_test = []
 
     for index in range(start, end + 1):
         # Store test predictions
         model = read_model(index, modelStr)
-        test_prediction = model.predict(test_data, batch_size=128, verbose=1)
-        yfull_test.append(test_prediction)
+        sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
+        model.compile(optimizer=sgd, loss='categorical_crossentropy')
 
+        b = sub_test_data[0]
+        b = b.astype('float32', copy=False)
+        mean_pixel = [103.939, 116.779, 123.68]        
+        for c in range(3):
+            b[:, c, :, :] = b[:, c, :, :] - mean_pixel[c]
+        single_subset_prediction = model.predict(b, batch_size=64, verbose=1)
+        prediction = single_subset_prediction
+        print('Predicted ' + str(1) + ' out of 5 subset of test images')
+
+        for i in range (1, 5):
+            b = sub_test_data[i]
+            b = b.astype('float32', copy=False)
+            mean_pixel = [103.939, 116.779, 123.68]
+            for c in range(3):
+                b[:, c, :, :] = b[:, c, :, :] - mean_pixel[c]
+            single_subset_prediction = model.predict(b, batch_size=64, verbose=1)
+            prediction = np.concatenate((prediction, single_subset_prediction))
+            print('Predicted ' + str(i+1) + ' out of 5 subset of test images')
+
+        yfull_test.append(prediction)
+
+        
     info_string = 'loss_' + modelStr \
                   + '_r_' + str(img_rows) \
                   + '_c_' + str(img_cols) \
@@ -441,9 +521,9 @@ def test_model_and_submit(start=1, end=1, modelStr=''):
     create_submission(test_res, test_id, info_string)
 
 # nfolds, nb_epoch, split
-run_cross_validation(2, 20, 0.15, '_vgg_16_2x20')
+# run_cross_validation(2, 20, 0.15, '_vgg_16_2x20')
 
 # nb_epoch, split
-# run_one_fold_cross_validation(10, 0.1)
+run_single(1, 0.1, '_vgg16_single')
 
-# test_model_and_submit(1, 10, 'high_epoch')
+test_model_and_submit(1, 1, '_vgg16_single')
